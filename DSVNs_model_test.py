@@ -36,6 +36,7 @@ import importlib
 import argparse
 import support
 from scipy import misc
+from PIL import Image
 from tensorflow.python.ops import data_flow_ops
 import os
 
@@ -95,25 +96,26 @@ def main(args):
 
         nrof_preprocess_threads = 4
         images_and_labels = []
-        for _ in range(nrof_preprocess_threads):
-            filenames, label = input_queue.dequeue()
-            images = []
-            for filename in tf.unstack(filenames):
-                file_contents = tf.read_file(filename)
-                #TODO FIFOQueue error 20180629
-                image = tf.image.decode_image(file_contents, channels=3)
-                
-                if args.random_crop:
-                    image = tf.random_crop(image, [args.image_size, args.image_size, 3])
-                else:
-                    image = tf.image.resize_image_with_crop_or_pad(image, args.image_size, args.image_size)
-                if args.random_flip:
-                    image = tf.image.random_flip_left_right(image)
-    
-                #pylint: disable=no-member
-                image.set_shape((args.image_size, args.image_size, 3))
-                images.append(tf.image.per_image_standardization(image))
-            images_and_labels.append([images, label])
+        with tf.name_scope("pipeline"):
+            for _ in range(nrof_preprocess_threads):
+                filenames, label = input_queue.dequeue()
+                images = []
+                for filename in tf.unstack(filenames):
+                    file_contents = tf.read_file(filename)
+                    #TODO FIFOQueue error 20180629
+                    image = tf.image.decode_image(file_contents, channels=3)
+                    
+                    if args.random_crop:
+                        image = tf.random_crop(image, [args.image_size, args.image_size, 3])
+                    else:
+                        image = tf.image.resize_image_with_crop_or_pad(image, args.image_size, args.image_size)
+                    if args.random_flip:
+                        image = tf.image.random_flip_left_right(image)
+        
+                    #pylint: disable=no-member
+                    image.set_shape((args.image_size, args.image_size, 3))
+                    images.append(tf.image.per_image_standardization(image))
+                images_and_labels.append([images, label])
     
         image_batch, labels_batch = tf.train.batch_join(
             images_and_labels, batch_size=batch_size_placeholder, 
@@ -170,8 +172,9 @@ def main(args):
 
             img_list = []
             image_path='./VIS_sample.png'
-            img = misc.imread(os.path.expanduser(image_path), mode='RGB')
-            aligned = misc.imresize(img, (args.image_size, args.image_size), interp='bilinear')
+            img = Image.open(os.path.expanduser(image_path))
+            aligned = np.asarray(img.resize((args.image_size, args.image_size), Image.ANTIALIAS))
+            # aligned = imageio.imresize(img, (args.image_size, args.image_size), interp='bilinear')
             prewhitened = support.prewhiten(aligned)
             img_list.append(prewhitened)
             images = np.stack(img_list)
@@ -200,7 +203,7 @@ def parse_arguments(argv):
                         help='Upper bound on the amount of GPU memory that will be used by the process.', default=0.8)
     parser.add_argument('--pretrained_model', type=str,
                         help='Load a pretrained model before training starts.',
-                        default='./')
+                        default='./DSVNs_model')
     parser.add_argument('--data_dir', type=str,
         help='Path to the data directory containing aligned face patches.',
         default='./')
