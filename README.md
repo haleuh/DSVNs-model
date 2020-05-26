@@ -27,8 +27,14 @@ model-DSVNs-one-fold.ckpt-2220.index
 model-DSVNs-one-fold.meta
 
 ## Test the DSVNs network
-One can test the DSVNs network by runing DSVNs_model_test.py. 
++ One can test the DSVNs network by runing DSVNs_model_test.py. 
++ Sample results:
 
+**VIS_sample**: 0.10721672  0.03787442 -0.20492454  ... -0.07138474  0.09071401
+
+**NIR_sample**: 0.16633749  0.02881693 -0.26924255  ...  0.05109603  0.00478259
+
+**Cosine distance**: 0.19720375537872314
 # The trained DSVNs models
 
 ## The CASIA NIR-VIS 2.0 dataset
