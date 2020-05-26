@@ -114,6 +114,7 @@ def main(args):
         
                     #pylint: disable=no-member
                     image.set_shape((args.image_size, args.image_size, 3))
+                    image = tf.image.convert_image_dtype(image, dtype=tf.float32, saturate=False)
                     images.append(tf.image.per_image_standardization(image))
                 images_and_labels.append([images, label])
     
