@@ -40,12 +40,10 @@ from PIL import Image
 from tensorflow.python.ops import data_flow_ops
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
 
 def main(args):
-
-
-
     network = importlib.import_module(args.model_def)
 
     subdir = datetime.strftime(datetime.now(), '%Y%m%d-%H%M%S')
@@ -56,17 +54,15 @@ def main(args):
     if not os.path.isdir(model_dir):  # Create the model directory if it doesn't exist
         os.makedirs(model_dir)
 
-
     # Write arguments to a text file
     support.write_arguments_to_file(args, os.path.join(log_dir, 'arguments.txt'))
-        
+
     # Store some git revision info in a text file in the log directory
-    src_path,_ = os.path.split(os.path.realpath(__file__))
+    src_path, _ = os.path.split(os.path.realpath(__file__))
     support.store_revision_info(src_path, log_dir, ' '.join(sys.argv))
 
     np.random.seed(seed=args.seed)
     train_set = support.get_dataset(args.data_dir)
-    
 
     with tf.Graph().as_default():
         tf.set_random_seed(args.seed)
@@ -74,18 +70,18 @@ def main(args):
 
         # Placeholder for the learning rate
         learning_rate_placeholder = tf.placeholder(tf.float32, name='learning_rate')
-        
+
         batch_size_placeholder = tf.placeholder(tf.int32, name='batch_size')
-        
+
         phase_train_placeholder = tf.placeholder(tf.bool, name='phase_train')
-        
-        image_paths_placeholder = tf.placeholder(tf.string, shape=(None,3), name='image_paths')
-        labels_placeholder = tf.placeholder(tf.int64, shape=(None,3), name='labels')
-        
+
+        image_paths_placeholder = tf.placeholder(tf.string, shape=(None, 3), name='image_paths')
+        labels_placeholder = tf.placeholder(tf.int64, shape=(None, 3), name='labels')
+
         input_queue = data_flow_ops.FIFOQueue(capacity=100000,
-                                    dtypes=[tf.string, tf.int64],
-                                    shapes=[(3,), (3,)],
-                                    shared_name=None, name=None)
+                                              dtypes=[tf.string, tf.int64],
+                                              shapes=[(3,), (3,)],
+                                              shared_name=None, name=None)
         enqueue_op = input_queue.enqueue_many([image_paths_placeholder, labels_placeholder])
 
         # TODO modality begin
@@ -102,24 +98,24 @@ def main(args):
                 images = []
                 for filename in tf.unstack(filenames):
                     file_contents = tf.read_file(filename)
-                    #TODO FIFOQueue error 20180629
+                    # TODO FIFOQueue error 20180629
                     image = tf.image.decode_image(file_contents, channels=3)
-                    
+
                     if args.random_crop:
                         image = tf.random_crop(image, [args.image_size, args.image_size, 3])
                     else:
                         image = tf.image.resize_image_with_crop_or_pad(image, args.image_size, args.image_size)
                     if args.random_flip:
                         image = tf.image.random_flip_left_right(image)
-        
-                    #pylint: disable=no-member
+
+                    # pylint: disable=no-member
                     image.set_shape((args.image_size, args.image_size, 3))
                     image = tf.image.convert_image_dtype(image, dtype=tf.float32, saturate=False)
                     images.append(tf.image.per_image_standardization(image))
                 images_and_labels.append([images, label])
-    
+
         image_batch, labels_batch = tf.train.batch_join(
-            images_and_labels, batch_size=batch_size_placeholder, 
+            images_and_labels, batch_size=batch_size_placeholder,
             shapes=[(args.image_size, args.image_size, 3), ()], enqueue_many=True,
             capacity=4 * nrof_preprocess_threads * args.batch_size,
             allow_smaller_final_batch=True)
@@ -128,19 +124,21 @@ def main(args):
         labels_batch = tf.identity(labels_batch, 'label_batch')
 
         # Build the inference graph
-        prelogits, prelogits_modality, orthogonality_loss, orthConvNum = network.inference(image_batch, args.keep_probability,
-            phase_train=phase_train_placeholder, bottleneck_layer_size=args.embedding_size,
-            weight_decay=args.weight_decay)
-        
+        prelogits, prelogits_modality, orthogonality_loss, orthConvNum = network.inference(image_batch,
+                                                                                           args.keep_probability,
+                                                                                           phase_train=phase_train_placeholder,
+                                                                                           bottleneck_layer_size=args.embedding_size,
+                                                                                           weight_decay=args.weight_decay)
+
         embeddings = tf.nn.l2_normalize(prelogits, 1, 1e-10, name='embeddings')
         # Split embeddings into anchor, positive and negative and calculate triplet loss
-        anchor, positive, negative = tf.unstack(tf.reshape(embeddings, [-1,3,args.embedding_size]), 3, 1)
+        anchor, positive, negative = tf.unstack(tf.reshape(embeddings, [-1, 3, args.embedding_size]), 3, 1)
         triplet_loss = support.triplet_loss(anchor, positive, negative, args.alpha)
 
         learning_rate = tf.train.exponential_decay(learning_rate_placeholder, global_step,
-            args.learning_rate_decay_epochs*args.epoch_size, args.learning_rate_decay_factor, staircase=True)
+                                                   args.learning_rate_decay_epochs * args.epoch_size,
+                                                   args.learning_rate_decay_factor, staircase=True)
         tf.summary.scalar('learning_rate', learning_rate)
-
 
         # Create a saver
         saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=10)
@@ -154,12 +152,10 @@ def main(args):
 
         # Start running operations on the Graph.
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))        
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 
         # Initialize variables
-        sess.run(tf.global_variables_initializer(), feed_dict={phase_train_placeholder:True})
-
-
+        sess.run(tf.global_variables_initializer(), feed_dict={phase_train_placeholder: True})
 
         summary_writer = tf.summary.FileWriter(log_dir, sess.graph)
         coord = tf.train.Coordinator()
@@ -172,20 +168,19 @@ def main(args):
                 support.load_model(args.pretrained_model)
 
             img_list = []
-            image_path='./VIS_sample.png'
+            image_path = './VIS_sample.png'
             img = Image.open(os.path.expanduser(image_path))
             aligned = np.asarray(img.resize((args.image_size, args.image_size), Image.ANTIALIAS))
             # aligned = imageio.imresize(img, (args.image_size, args.image_size), interp='bilinear')
             prewhitened = support.prewhiten(aligned)
             img_list.append(prewhitened)
             images = np.stack(img_list)
-            feed_dict = { images_placeholder: images, phase_train_placeholder:False }
+            feed_dict = {images_placeholder: images, phase_train_placeholder: False}
             feas = sess.run(embeddings, feed_dict=feed_dict)
             print(image_path)
             print(feas)
 
     return model_dir
-
 
 
 def parse_arguments(argv):
@@ -206,11 +201,11 @@ def parse_arguments(argv):
                         help='Load a pretrained model before training starts.',
                         default='./DSVNs_model')
     parser.add_argument('--data_dir', type=str,
-        help='Path to the data directory containing aligned face patches.',
-        default='./')
+                        help='Path to the data directory containing aligned face patches.',
+                        default='./')
     parser.add_argument('--modality_data_dir', type=str,
-        help='Path to the data directory containing aligned face patches.',
-        default='./')
+                        help='Path to the data directory containing aligned face patches.',
+                        default='./')
     parser.add_argument('--model_def', type=str,
                         help='Model definition. Points to a module models/containing the definition of the inference graph.',
                         default='DSVNs_Architecture')
@@ -269,7 +264,7 @@ def parse_arguments(argv):
                         default='./data/learning_rate_schedule.txt')
 
     return parser.parse_args(argv)
-  
+
 
 if __name__ == '__main__':
     main(parse_arguments(sys.argv[1:]))
