@@ -36,7 +36,6 @@ import importlib
 import argparse
 import support
 from PIL import Image
-from tensorflow.python.ops import data_flow_ops
 import os
 from scipy.spatial.distance import cosine, euclidean
 
@@ -58,70 +57,13 @@ def main(args):
     src_path, _ = os.path.split(os.path.realpath(__file__))
     support.store_revision_info(src_path, log_dir, ' '.join(sys.argv))
 
-    np.random.seed(seed=args.seed)
-    # train_set = support.get_dataset(args.data_dir)
-
     with tf.Graph().as_default():
-        tf.set_random_seed(args.seed)
-        global_step = tf.Variable(0, trainable=False)
-
-        # Placeholder for the learning rate
-        learning_rate_placeholder = tf.placeholder(tf.float32, name='learning_rate')
-
-        batch_size_placeholder = tf.placeholder(tf.int32, name='batch_size')
-
         phase_train_placeholder = tf.placeholder(tf.bool, name='phase_train')
-
-        # image_paths_placeholder = tf.placeholder(tf.string, shape=(None, 3), name='image_paths')
-        # labels_placeholder = tf.placeholder(tf.int64, shape=(None, 3), name='labels')
-
-        input_queue = data_flow_ops.FIFOQueue(capacity=100000,
-                                              dtypes=[tf.string, tf.int64],
-                                              shapes=[(3,), (3,)],
-                                              shared_name=None, name=None)
-        # enqueue_op = input_queue.enqueue_many([image_paths_placeholder, labels_placeholder])
-
-        # TODO modality begin
-
-        # train_set_modality = support.get_dataset(args.modality_data_dir)
-
-        # TODO modality end
-
-        nrof_preprocess_threads = 1
-        images_and_labels = []
-        with tf.name_scope("pipeline"):
-            for _ in range(nrof_preprocess_threads):
-                filenames, label = input_queue.dequeue()
-                images = []
-                for filename in tf.unstack(filenames):
-                    file_contents = tf.read_file(filename)
-                    # TODO FIFOQueue error 20180629
-                    image = tf.image.decode_image(file_contents, channels=3)
-
-                    # if args.random_crop:
-                    #     image = tf.random_crop(image, [args.image_size, args.image_size, 3])
-                    # else:
-                    image = tf.image.resize_image_with_crop_or_pad(image, args.image_size, args.image_size)
-                    # if args.random_flip:
-                    #     image = tf.image.random_flip_left_right(image)
-
-                    # pylint: disable=no-member
-                    image.set_shape((args.image_size, args.image_size, 3))
-                    image = tf.image.convert_image_dtype(image, dtype=tf.float32, saturate=False)
-                    images.append(tf.image.per_image_standardization(image))
-                images_and_labels.append([images, label])
-
-        image_batch, labels_batch = tf.train.batch_join(
-            images_and_labels, batch_size=batch_size_placeholder,
-            shapes=[(args.image_size, args.image_size, 3), ()], enqueue_many=True,
-            capacity=4 * nrof_preprocess_threads * args.batch_size,
-            allow_smaller_final_batch=True)
-        image_batch = tf.identity(image_batch, 'image_batch')
-        image_batch = tf.identity(image_batch, 'input')
-        # labels_batch = tf.identity(labels_batch, 'label_batch')
-
+        images_placeholder = tf.placeholder(tf.float32,
+                                            shape=(None, args.image_size, args.image_size, 3),
+                                            name='input')
         # Build the inference graph
-        prelogits, _, _, _ = network.inference(image_batch,
+        prelogits, _, _, _ = network.inference(images_placeholder,
                                                args.keep_probability,
                                                phase_train=phase_train_placeholder,
                                                bottleneck_layer_size=args.embedding_size,
@@ -140,9 +82,7 @@ def main(args):
         # Initialize variables
         sess.run(tf.global_variables_initializer(), feed_dict={phase_train_placeholder: True})
 
-        images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
         with sess.as_default():
-
             if args.pretrained_model:
                 print('Restoring pretrained model: %s' % args.pretrained_model)
                 support.load_model(args.pretrained_model)
