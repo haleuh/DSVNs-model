@@ -35,12 +35,12 @@ import numpy as np
 import importlib
 import argparse
 import support
-from scipy import misc
 from PIL import Image
 from tensorflow.python.ops import data_flow_ops
 import os
+from scipy.spatial.distance import cosine, euclidean
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 def main(args):
@@ -59,7 +59,7 @@ def main(args):
     support.store_revision_info(src_path, log_dir, ' '.join(sys.argv))
 
     np.random.seed(seed=args.seed)
-    train_set = support.get_dataset(args.data_dir)
+    # train_set = support.get_dataset(args.data_dir)
 
     with tf.Graph().as_default():
         tf.set_random_seed(args.seed)
@@ -72,22 +72,22 @@ def main(args):
 
         phase_train_placeholder = tf.placeholder(tf.bool, name='phase_train')
 
-        image_paths_placeholder = tf.placeholder(tf.string, shape=(None, 3), name='image_paths')
-        labels_placeholder = tf.placeholder(tf.int64, shape=(None, 3), name='labels')
+        # image_paths_placeholder = tf.placeholder(tf.string, shape=(None, 3), name='image_paths')
+        # labels_placeholder = tf.placeholder(tf.int64, shape=(None, 3), name='labels')
 
         input_queue = data_flow_ops.FIFOQueue(capacity=100000,
                                               dtypes=[tf.string, tf.int64],
                                               shapes=[(3,), (3,)],
                                               shared_name=None, name=None)
-        enqueue_op = input_queue.enqueue_many([image_paths_placeholder, labels_placeholder])
+        # enqueue_op = input_queue.enqueue_many([image_paths_placeholder, labels_placeholder])
 
         # TODO modality begin
 
-        train_set_modality = support.get_dataset(args.modality_data_dir)
+        # train_set_modality = support.get_dataset(args.modality_data_dir)
 
         # TODO modality end
 
-        nrof_preprocess_threads = 4
+        nrof_preprocess_threads = 1
         images_and_labels = []
         with tf.name_scope("pipeline"):
             for _ in range(nrof_preprocess_threads):
@@ -98,12 +98,12 @@ def main(args):
                     # TODO FIFOQueue error 20180629
                     image = tf.image.decode_image(file_contents, channels=3)
 
-                    if args.random_crop:
-                        image = tf.random_crop(image, [args.image_size, args.image_size, 3])
-                    else:
-                        image = tf.image.resize_image_with_crop_or_pad(image, args.image_size, args.image_size)
-                    if args.random_flip:
-                        image = tf.image.random_flip_left_right(image)
+                    # if args.random_crop:
+                    #     image = tf.random_crop(image, [args.image_size, args.image_size, 3])
+                    # else:
+                    image = tf.image.resize_image_with_crop_or_pad(image, args.image_size, args.image_size)
+                    # if args.random_flip:
+                    #     image = tf.image.random_flip_left_right(image)
 
                     # pylint: disable=no-member
                     image.set_shape((args.image_size, args.image_size, 3))
@@ -118,34 +118,20 @@ def main(args):
             allow_smaller_final_batch=True)
         image_batch = tf.identity(image_batch, 'image_batch')
         image_batch = tf.identity(image_batch, 'input')
-        labels_batch = tf.identity(labels_batch, 'label_batch')
+        # labels_batch = tf.identity(labels_batch, 'label_batch')
 
         # Build the inference graph
-        prelogits, prelogits_modality, orthogonality_loss, orthConvNum = network.inference(image_batch,
-                                                                                           args.keep_probability,
-                                                                                           phase_train=phase_train_placeholder,
-                                                                                           bottleneck_layer_size=args.embedding_size,
-                                                                                           weight_decay=args.weight_decay)
+        prelogits, _, _, _ = network.inference(image_batch,
+                                               args.keep_probability,
+                                               phase_train=phase_train_placeholder,
+                                               bottleneck_layer_size=args.embedding_size,
+                                               weight_decay=args.weight_decay)
 
         embeddings = tf.nn.l2_normalize(prelogits, 1, 1e-10, name='embeddings')
-        # Split embeddings into anchor, positive and negative and calculate triplet loss
-        anchor, positive, negative = tf.unstack(tf.reshape(embeddings, [-1, 3, args.embedding_size]), 3, 1)
-        triplet_loss = support.triplet_loss(anchor, positive, negative, args.alpha)
-
-        learning_rate = tf.train.exponential_decay(learning_rate_placeholder, global_step,
-                                                   args.learning_rate_decay_epochs * args.epoch_size,
-                                                   args.learning_rate_decay_factor, staircase=True)
-        tf.summary.scalar('learning_rate', learning_rate)
-
         # Create a saver
+        # TODO: If delete the two savers below --> random results
         saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=10)
-
-        # TODO save best acc
-        # Create a saver
         best_saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=10)
-
-        # Build the summary operation based on the TF collection of Summaries.
-        summary_op = tf.summary.merge_all()
 
         # Start running operations on the Graph.
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
@@ -154,9 +140,6 @@ def main(args):
         # Initialize variables
         sess.run(tf.global_variables_initializer(), feed_dict={phase_train_placeholder: True})
 
-        summary_writer = tf.summary.FileWriter(log_dir, sess.graph)
-        coord = tf.train.Coordinator()
-        tf.train.start_queue_runners(coord=coord, sess=sess)
         images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
         with sess.as_default():
 
@@ -165,17 +148,18 @@ def main(args):
                 support.load_model(args.pretrained_model)
 
             img_list = []
-            image_path = './VIS_sample.png'
-            img = Image.open(os.path.expanduser(image_path))
-            aligned = np.asarray(img.resize((args.image_size, args.image_size), Image.ANTIALIAS))
-            # aligned = imageio.imresize(img, (args.image_size, args.image_size), interp='bilinear')
-            prewhitened = support.prewhiten(aligned)
-            img_list.append(prewhitened)
+            image_paths = ['./VIS_sample.png', './NIR_sample.png']
+            for image_path in image_paths:
+                img = Image.open(os.path.expanduser(image_path))
+                aligned = np.asarray(img.resize((args.image_size, args.image_size), Image.ANTIALIAS))
+                prewhitened = support.prewhiten(aligned)
+                img_list.append(prewhitened)
             images = np.stack(img_list)
             feed_dict = {images_placeholder: images, phase_train_placeholder: False}
             feas = sess.run(embeddings, feed_dict=feed_dict)
             print(image_path)
             print(feas)
+            print(cosine(feas[0], feas[1]), euclidean(feas[0], feas[1]))
 
 
 def parse_arguments(argv):
