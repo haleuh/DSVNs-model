@@ -76,8 +76,9 @@ def main(args):
         best_saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=10)
 
         # Start running operations on the Graph.
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        sess = tf.Session(config=config)
 
         # Initialize variables
         sess.run(tf.global_variables_initializer(), feed_dict={phase_train_placeholder: True})
