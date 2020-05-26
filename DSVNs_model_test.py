@@ -50,9 +50,6 @@ def main(args):
     log_dir = os.path.join(os.path.expanduser(args.logs_base_dir), subdir)
     if not os.path.isdir(log_dir):  # Create the log directory if it doesn't exist
         os.makedirs(log_dir)
-    model_dir = os.path.join(os.path.expanduser(args.models_base_dir), subdir)
-    if not os.path.isdir(model_dir):  # Create the model directory if it doesn't exist
-        os.makedirs(model_dir)
 
     # Write arguments to a text file
     support.write_arguments_to_file(args, os.path.join(log_dir, 'arguments.txt'))
@@ -179,8 +176,6 @@ def main(args):
             feas = sess.run(embeddings, feed_dict=feed_dict)
             print(image_path)
             print(feas)
-
-    return model_dir
 
 
 def parse_arguments(argv):
